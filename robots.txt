@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dsa-difathar-soccer-academy.github.io/DSA-Difathar-Soccer-Academy-KE/sitemap.xml
