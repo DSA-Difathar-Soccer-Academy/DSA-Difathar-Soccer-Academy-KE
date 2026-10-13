@@ -269,7 +269,7 @@
     <h2>Administrator Access</h2>
     <p>Enter the secure passcode to access the CMS.</p>
     <form id="authForm" onsubmit="event.preventDefault(); verifyAuth();">
-      <input type="password" id="adminAuthPasscode" maxlength="4" placeholder="••••" inputmode="numeric" value="" autocomplete="new-password">
+      <input type="password" id="adminAuthPasscode" placeholder="Enter passcode" inputmode="text" value="" autocomplete="new-password">
       <input type="text" style="display:none;" autocomplete="username" value="admin">
       <div class="auth-error" id="authError">Incorrect passcode. Please try again.</div>
       <button type="button" id="authLoginBtn"><i class="fas fa-key"></i> UNLOCK CMS</button>
@@ -2261,9 +2261,8 @@ function openRegistration() {
 window.openRegistration = openRegistration;
 
 // ============================================
-// ADMIN AUTHENTICATION
+// ADMIN AUTHENTICATION (Supabase-backed)
 // ============================================
-var ADMIN_PASSCODE = "chomarley";
 var isAuthenticated = sessionStorage.getItem('dsa_admin_auth') === 'true';
 var authOverlay = document.getElementById('adminAuthOverlay');
 var authPasscode = document.getElementById('adminAuthPasscode');
@@ -2293,18 +2292,58 @@ function hideAuthOverlay() {
     }
 }
 
-function verifyAuth() {
-    if (authPasscode.value === ADMIN_PASSCODE) {
-        sessionStorage.setItem('dsa_admin_auth', 'true');
-        isAuthenticated = true;
-        hideAuthOverlay();
-        initializeCMS();
-        showToast('✅ Admin access granted!');
-    } else {
+async function fetchAdminPasscode() {
+    if (!supabaseClient) {
+        throw new Error('Supabase not initialized');
+    }
+    var result = await supabaseClient
+        .from('admin_auth')
+        .select('passcode')
+        .limit(1)
+        .maybeSingle();
+
+    if (result.error) throw result.error;
+    if (!result.data || !result.data.passcode) {
+        throw new Error('No passcode configured in Supabase');
+    }
+    return result.data.passcode;
+}
+
+async function verifyAuth() {
+    var entered = authPasscode.value;
+    if (!entered) {
+        authError.textContent = 'Please enter the passcode.';
         authError.style.display = 'block';
-        authPasscode.value = '';
-        authPasscode.focus();
-        showToast('❌ Incorrect passcode', 'error');
+        return;
+    }
+
+    authLoginBtn.disabled = true;
+    authLoginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+
+    try {
+        var storedPasscode = await fetchAdminPasscode();
+
+        if (entered === storedPasscode) {
+            sessionStorage.setItem('dsa_admin_auth', 'true');
+            isAuthenticated = true;
+            hideAuthOverlay();
+            initializeCMS();
+            showToast('✅ Admin access granted!');
+        } else {
+            authError.textContent = 'Incorrect passcode. Please try again.';
+            authError.style.display = 'block';
+            authPasscode.value = '';
+            authPasscode.focus();
+            showToast('❌ Incorrect passcode', 'error');
+        }
+    } catch (e) {
+        console.error('Auth error:', e);
+        authError.textContent = 'Auth failed: ' + (e.message || 'connection error');
+        authError.style.display = 'block';
+        showToast('❌ Auth failed: ' + (e.message || 'connection error'), 'error');
+    } finally {
+        authLoginBtn.disabled = false;
+        authLoginBtn.innerHTML = '<i class="fas fa-key"></i> UNLOCK CMS';
     }
 }
 
@@ -2331,7 +2370,6 @@ function logoutAdmin() {
     }
     window.location.href = previousPage;
 }
-window.logoutAdmin = logoutAdmin;
 
 // ============================================
 // NAVIGATION CLICK HANDLERS
@@ -2433,11 +2471,17 @@ function initializeCMS() {
 // ============================================
 // START
 // ============================================
-if (!checkAdminAuth()) {
-    showAuthOverlay();
-} else {
-    initializeCMS();
-}
+// Initialize Supabase FIRST so auth can query it
+initSupabase();
+
+// Wait a moment for the client to be ready, then check auth
+setTimeout(function() {
+    if (!checkAdminAuth()) {
+        showAuthOverlay();
+    } else {
+        initializeCMS();
+    }
+}, 300);
 
 console.log('✅ DSA CMS v4.1 with Supabase Integration loaded (Fixed Settings)');
 </script>

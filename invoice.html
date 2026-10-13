@@ -705,7 +705,7 @@ small{color:var(--muted);font-size:var(--text-xs);line-height:1.3;display:block;
 .login-modal{text-align:center}
 .login-modal h2{font-size:clamp(17px,4.5vw,19px);font-weight:800}
 .login-modal p{font-size:var(--text-sm);margin:2px 0 10px}
-.passcode{text-align:center;font-size:var(--text-xl);font-weight:900;letter-spacing:6px;width:100%}
+.passcode{text-align:center;font-size:var(--text-xl);font-weight:900;letter-spacing:2px;width:100%}
 .login-error{display:none;margin-top:6px;padding:6px;border-radius:var(--radius-sm);background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:var(--text-xs);font-weight:700}
 
 .admin-summary{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
@@ -1195,7 +1195,7 @@ td{color:#334155;font-size:var(--text-xs)}
         <p>Enter the secure administrator passcode.</p>
         <form id="adminLoginForm" autocomplete="off">
             <input type="text" name="username" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;opacity:0;pointer-events:none;">
-            <input id="adminPasscode" class="passcode" type="password" inputmode="numeric" maxlength="4" autocomplete="current-password" placeholder="••••" required>
+            <input id="adminPasscode" class="passcode" type="password" inputmode="text" autocomplete="current-password" placeholder="Enter passcode" required>
             <button type="submit" class="btn btn-primary" id="adminLoginButton" style="width:100%;margin-top:8px;">ACCESS ADMIN DASHBOARD</button>
         </form>
         <div id="loginError" class="login-error">Incorrect administrator passcode.</div>
@@ -1462,7 +1462,7 @@ td{color:#334155;font-size:var(--text-xs)}
 (function() {
     'use strict';
 
-    var ADMIN_PASSCODE = "9586";
+    // Admin passcode is loaded from Supabase (admin_auth table)
     var PAYMENT_PERIOD_KEY = "difathar_payment_period_v1";
     
     var STATUS = {
@@ -2764,6 +2764,12 @@ td{color:#334155;font-size:var(--text-xs)}
         adminPasscode.value = "";
         loginError.style.display = "none";
         setTimeout(function(){ adminPasscode.focus(); }, 100);
+
+        // Warn early if Supabase isn't ready
+        if (!supabaseSync || !supabaseSync.client) {
+            loginError.textContent = "Connecting to server... please wait a moment.";
+            loginError.style.display = "block";
+        }
     }
 
     function closePasscodeModal() {
@@ -2791,21 +2797,61 @@ td{color:#334155;font-size:var(--text-xs)}
         renderPaymentMethods();
     }
 
-    function verifyAdminPasscode() {
-        if (!adminPasscode.value || adminPasscode.value.length < 4) {
-            loginError.textContent = "Please enter the 4-digit passcode.";
+    async function fetchAdminPasscode() {
+        if (!supabaseSync || !supabaseSync.client) {
+            throw new Error("Supabase not initialized");
+        }
+        var result = await supabaseSync.client
+            .from('admin_auth')
+            .select('passcode')
+            .limit(1)
+            .maybeSingle();
+
+        if (result.error) throw result.error;
+        if (!result.data || !result.data.passcode) {
+            throw new Error("No passcode configured in Supabase");
+        }
+        return result.data.passcode;
+    }
+
+    async function verifyAdminPasscode() {
+        var entered = adminPasscode.value;
+        if (!entered) {
+            loginError.textContent = "Please enter the passcode.";
             loginError.style.display = "block";
             return;
         }
-        if(adminPasscode.value === ADMIN_PASSCODE) {
-            closePasscodeModal();
-            openAdminDashboard();
-            return;
+
+        var loginButton = document.getElementById("adminLoginButton");
+        if (loginButton) {
+            loginButton.disabled = true;
+            loginButton.textContent = "VERIFYING...";
         }
-        loginError.textContent = "Incorrect administrator passcode.";
-        loginError.style.display = "block";
-        adminPasscode.value = "";
-        adminPasscode.focus();
+        loginError.style.display = "none";
+
+        try {
+            var storedPasscode = await fetchAdminPasscode();
+
+            if (entered === storedPasscode) {
+                closePasscodeModal();
+                openAdminDashboard();
+                return;
+            }
+
+            loginError.textContent = "Incorrect administrator passcode.";
+            loginError.style.display = "block";
+            adminPasscode.value = "";
+            adminPasscode.focus();
+        } catch (e) {
+            console.error("Auth error:", e);
+            loginError.textContent = "Auth failed: " + (e.message || "connection error");
+            loginError.style.display = "block";
+        } finally {
+            if (loginButton) {
+                loginButton.disabled = false;
+                loginButton.textContent = "ACCESS ADMIN DASHBOARD";
+            }
+        }
     }
 
     function renderAdminDashboard() {
