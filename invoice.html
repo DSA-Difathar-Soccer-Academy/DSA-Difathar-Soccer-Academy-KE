@@ -463,18 +463,38 @@ class SupabaseSyncService {
             const fileExt = file.name.split('.').pop();
             const fileName = `logo-${Date.now()}.${fileExt}`;
             const filePath = `logos/${fileName}`;
-            const { error } = await this.client.storage.from('logos').upload(filePath, file, { 
-                cacheControl: '3600', upsert: true 
-            });
-            if (error) throw error;
+
+            console.log('📤 Uploading to storage bucket "logos":', filePath);
+            const { error: uploadError } = await this.client
+                .storage.from('logos')
+                .upload(filePath, file, { cacheControl: '3600', upsert: true });
+            if (uploadError) {
+                console.error('❌ Storage upload failed:', uploadError);
+                throw new Error('Storage upload: ' + uploadError.message);
+            }
+
             const { data: urlData } = this.client.storage.from('logos').getPublicUrl(filePath);
-            await this.client.from('admin_settings').upsert({ 
-                key: 'site_settings', 
-                value: { logo_url: urlData.publicUrl, logo_path: filePath }, 
-                updated_at: new Date().toISOString() 
-            }, { onConflict: 'key' });
+            console.log('🔗 Public URL:', urlData.publicUrl);
+
+            const { error: dbError } = await this.client
+                .from('admin_settings')
+                .upsert(
+                    {
+                        key: 'site_settings',
+                        value: { logo_url: urlData.publicUrl, logo_path: filePath },
+                        updated_at: new Date().toISOString()
+                    },
+                    { onConflict: 'key' }
+                );
+            if (dbError) {
+                console.error('❌ admin_settings upsert failed:', dbError);
+                throw new Error('DB save: ' + dbError.message);
+            }
+
+            console.log('✅ Logo saved to storage AND admin_settings');
             return { success: true, url: urlData.publicUrl };
-        } catch(e) { 
+        } catch(e) {
+            console.error('uploadLogo error:', e);
             return { success: false, error: e.message };
         }
     }
@@ -1595,6 +1615,8 @@ td{color:#334155;font-size:var(--text-xs)}
     var invoices = [];
     var currentInvoice = null;
     var academyLogo = "";
+    var academyLogoImage = null;     // preloaded Image object
+    var academyLogoLoaded = false;   // flag
     var adminHoldTimer = null;
     var adminHolding = false;
     var toastTimer = null;
@@ -2257,14 +2279,14 @@ td{color:#334155;font-size:var(--text-xs)}
     // ============================================
     // RENDER INVOICE
     // ============================================
-    function renderInvoice(invoice) {
+    async function renderInvoice(invoice) {
         if (!invoice) {
             previewEmpty.style.display = "block";
             invoicePreviewImage.style.display = "none";
             previewActions.style.display = "none";
             return;
         }
-        var image = createFullInvoiceImage(invoice);
+        var image = await createFullInvoiceImage(invoice);
         invoicePreviewImage.src = image;
         invoicePreviewImage.style.display = "block";
         previewEmpty.style.display = "none";
@@ -2358,6 +2380,7 @@ td{color:#334155;font-size:var(--text-xs)}
     }
 
     function createFullInvoiceImage(invoice) {
+        return new Promise(function(resolve) {
         var width = canvas.width;
         var height = canvas.height;
         ctx.clearRect(0, 0, width, height);
@@ -2393,24 +2416,7 @@ td{color:#334155;font-size:var(--text-xs)}
             }
         }
         
-        if (academyLogo && academyLogo.length > 100) {
-            var img = new Image();
-            img.onload = function() {
-                var maxWidth = 190;
-                var maxHeight = 160;
-                var ratio = Math.min(maxWidth/img.width, maxHeight/img.height);
-                var w = img.width * ratio;
-                var h = img.height * ratio;
-                ctx.save();
-                ctx.shadowColor = "rgba(5,45,100,.15)";
-                ctx.shadowBlur = 14;
-                ctx.shadowOffsetY = 6;
-                ctx.drawImage(img, 75 + (maxWidth - w)/2, 70 + (maxHeight - h)/2, w, h);
-                ctx.restore();
-                invoicePreviewImage.src = canvas.toDataURL("image/png");
-            };
-            img.src = academyLogo;
-        } else {
+        function drawPlaceholder() {
             ctx.save();
             ctx.shadowColor = "rgba(5,45,100,.15)";
             ctx.shadowBlur = 12;
@@ -2428,6 +2434,53 @@ td{color:#334155;font-size:var(--text-xs)}
             ctx.fillText("DSA", 170, 155);
             ctx.restore();
         }
+
+        if (academyLogoLoaded && academyLogoImage) {
+            // Use the preloaded image — instant, no network wait
+            var img = academyLogoImage;
+            var maxWidth = 190;
+            var maxHeight = 160;
+            var ratio = Math.min(maxWidth/img.width, maxHeight/img.height);
+            var w = img.width * ratio;
+            var h = img.height * ratio;
+            ctx.save();
+            ctx.shadowColor = "rgba(5,45,100,.15)";
+            ctx.shadowBlur = 14;
+            ctx.shadowOffsetY = 6;
+            ctx.drawImage(img, 75 + (maxWidth - w)/2, 70 + (maxHeight - h)/2, w, h);
+            ctx.restore();
+            drawRest();
+        } else if (academyLogo && academyLogo.length > 10) {
+            // Fallback: load on demand if preload hasn't finished yet
+            var img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = function() {
+                academyLogoImage = img;
+                academyLogoLoaded = true;
+                var maxWidth = 190;
+                var maxHeight = 160;
+                var ratio = Math.min(maxWidth/img.width, maxHeight/img.height);
+                var w = img.width * ratio;
+                var h = img.height * ratio;
+                ctx.save();
+                ctx.shadowColor = "rgba(5,45,100,.15)";
+                ctx.shadowBlur = 14;
+                ctx.shadowOffsetY = 6;
+                ctx.drawImage(img, 75 + (maxWidth - w)/2, 70 + (maxHeight - h)/2, w, h);
+                ctx.restore();
+                drawRest();
+            };
+            img.onerror = function() {
+                drawPlaceholder();
+                drawRest();
+            };
+            img.src = academyLogo;
+        } else {
+            drawPlaceholder();
+            drawRest();
+        }
+
+        function drawRest() {
         
         ctx.strokeStyle = "#0a2d67";
         ctx.lineWidth = 2.5;
@@ -2752,7 +2805,15 @@ td{color:#334155;font-size:var(--text-xs)}
         ctx.fillText("Invoice " + invoice.invoice_no + "  •  Period: " + (invoice.payment_period || getCurrentPaymentPeriod()), 600, 1434);
         
         ctx.restore();
-        return canvas.toDataURL("image/png");
+        try {
+            resolve(canvas.toDataURL("image/png"));
+        } catch (e) {
+            console.error("Canvas export failed:", e);
+            resolve("");
+        }
+        }
+
+        });
     }
 
     // ============================================
@@ -3047,10 +3108,10 @@ td{color:#334155;font-size:var(--text-xs)}
     // ============================================
     // DOWNLOAD & PRINT
     // ============================================
-    function downloadCurrentInvoice() {
+    async function downloadCurrentInvoice() {
         if(!currentInvoice) { showToast("Generate or find an invoice first."); return; }
         if(!userCanDownload(currentInvoice)) { showToast("⏳ Your invoice is awaiting admin acceptance."); return; }
-        renderInvoice(currentInvoice);
+        await renderInvoice(currentInvoice);
         setTimeout(function() {
             var link = document.createElement("a");
             link.href = invoicePreviewImage.src;
@@ -3061,10 +3122,10 @@ td{color:#334155;font-size:var(--text-xs)}
         }, 100);
     }
 
-    function printCurrentInvoice() {
+    async function printCurrentInvoice() {
         if(!currentInvoice) { showToast("Generate or find an invoice first."); return; }
         if(!userCanDownload(currentInvoice)) { showToast("⏳ Your invoice is awaiting admin acceptance."); return; }
-        renderInvoice(currentInvoice);
+        await renderInvoice(currentInvoice);
         setTimeout(function() {
             var printWindow = window.open("", "_blank", "width=900,height=1000");
             if(!printWindow) { showToast("Please allow pop-ups to print the invoice."); return; }
@@ -3146,7 +3207,7 @@ td{color:#334155;font-size:var(--text-xs)}
     // LOGO FUNCTIONS
     // ============================================
     function applyAcademyLogo() {
-        var hasLogo = Boolean(academyLogo && academyLogo.length > 100);
+        var hasLogo = Boolean(academyLogo && academyLogo.length > 10);
         mainLogo.style.display = hasLogo ? "block" : "none";
         logoPlaceholder.style.display = hasLogo ? "none" : "block";
         adminLogoImage.style.display = hasLogo ? "block" : "none";
@@ -3155,12 +3216,45 @@ td{color:#334155;font-size:var(--text-xs)}
         else { mainLogo.removeAttribute("src"); adminLogoImage.removeAttribute("src"); }
     }
 
+    function preloadLogoImage(url) {
+        return new Promise(function(resolve) {
+            if (!url || url.length < 10) { resolve(false); return; }
+            var img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = function() {
+                academyLogoImage = img;
+                academyLogoLoaded = true;
+                console.log('✅ Logo preloaded into memory:', url);
+                resolve(true);
+            };
+            img.onerror = function() {
+                console.warn('⚠️ Logo preload failed:', url);
+                academyLogoLoaded = false;
+                resolve(false);
+            };
+            img.src = url;
+        });
+    }
+
     function initializeLogo() {
         applyAcademyLogo();
         if (supabaseSync.isConnected()) {
             supabaseSync.getLogo().then(function(result) {
-                if (result.success && result.url) { academyLogo = result.url; applyAcademyLogo(); }
-            }).catch(function(err) {});
+                console.log('🖼️ Logo fetch result:', result);
+                if (result.success && result.url) {
+                    academyLogo = result.url;
+                    console.log('✅ Logo URL set:', academyLogo, 'length:', academyLogo.length);
+                    applyAcademyLogo();
+                    // Preload into memory so invoice rendering is instant
+                    preloadLogoImage(academyLogo).then(function() {
+                        if (currentInvoice) { renderInvoice(currentInvoice); }
+                    });
+                } else {
+                    console.log('ℹ️ No logo found in Supabase');
+                }
+            }).catch(function(err) {
+                console.warn('⚠️ Logo fetch error:', err);
+            });
         }
     }
 
@@ -3168,20 +3262,29 @@ td{color:#334155;font-size:var(--text-xs)}
         if(!file) { showNotice(adminLogoNotice, "Please select an image file.", "error"); return; }
         if(file.size > 5 * 1024 * 1024) { showNotice(adminLogoNotice, "Logo file is too large. Maximum size is 5 MB.", "error"); adminLogoInput.value = ""; return; }
         if(!["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(file.type)) { showNotice(adminLogoNotice, "Please upload a PNG, JPEG, WebP or SVG image.", "error"); adminLogoInput.value = ""; return; }
-        var reader = new FileReader();
-        reader.onload = function(event) {
-            var blob = new Blob([event.target.result], { type: file.type });
-            var fileObj = new File([blob], file.name, { type: file.type });
-            supabaseSync.uploadLogo(fileObj).then(function(result) {
-                if (result.success && result.url) { academyLogo = result.url; applyAcademyLogo(); showNotice(adminLogoNotice, "✅ Academy logo saved to cloud!", "success"); if(currentInvoice) { renderInvoice(currentInvoice); } showToast("✅ Logo saved to cloud!"); } 
-                else { showNotice(adminLogoNotice, "❌ Failed to save logo: " + result.error, "error"); }
-            });
-        };
-        reader.readAsDataURL(file);
+        supabaseSync.uploadLogo(file).then(function(result) {
+            if (result.success && result.url) {
+                academyLogo = result.url;
+                academyLogoImage = null;        // clear old preloaded image
+                academyLogoLoaded = false;
+                console.log('✅ Logo set in state:', academyLogo, 'length:', academyLogo.length);
+                applyAcademyLogo();
+                showNotice(adminLogoNotice, "✅ Academy logo saved to cloud!", "success");
+                // Preload new logo, then re-render
+                preloadLogoImage(academyLogo).then(function() {
+                    if(currentInvoice) { renderInvoice(currentInvoice); }
+                });
+                showToast("✅ Logo saved to cloud!");
+            } else {
+                showNotice(adminLogoNotice, "❌ Failed to save logo: " + result.error, "error");
+            }
+        });
     }
 
     function removeLogo() {
         academyLogo = "";
+        academyLogoImage = null;
+        academyLogoLoaded = false;
         applyAcademyLogo();
         showNotice(adminLogoNotice, "✅ Academy logo removed.", "success");
         if(currentInvoice) { renderInvoice(currentInvoice); }
@@ -3819,14 +3922,20 @@ td{color:#334155;font-size:var(--text-xs)}
             if (!supabaseSync.isInitialized()) {
                 console.log('⏳ Waiting for Supabase initialization...');
                 await new Promise(resolve => {
+                    var settled = false;
                     const checkInit = setInterval(() => {
+                        if (settled) return;
                         if (supabaseSync.isInitialized()) {
+                            settled = true;
                             clearInterval(checkInit);
+                            clearTimeout(timeoutId);
                             console.log('✅ Supabase initialized');
                             resolve();
                         }
                     }, 200);
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
                         clearInterval(checkInit);
                         console.warn('⚠️ Supabase init timeout, continuing anyway');
                         resolve();
@@ -3836,7 +3945,19 @@ td{color:#334155;font-size:var(--text-xs)}
             
             await new Promise(resolve => setTimeout(resolve, 500));
             await loadAllData();
-            initializeLogo();
+            // Wait for logo to load BEFORE first render (max 3s to avoid hang)
+            await Promise.race([
+                new Promise(function(resolve) {
+                    initializeLogo();
+                    var check = setInterval(function() {
+                        if (academyLogoLoaded || !academyLogo) {
+                            clearInterval(check);
+                            resolve();
+                        }
+                    }, 100);
+                }),
+                new Promise(function(resolve) { setTimeout(resolve, 3000); })
+            ]);
             updatePaymentAmount();
             updatePaymentStatus();
             updateDownloadAccess();

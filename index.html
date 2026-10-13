@@ -5321,16 +5321,16 @@
             <div class="payment-box">
                 <div class="icon-small"><i class="fas fa-coins"></i></div>
                 <div class="title-small">Service Reactivation</div>
-                <div class="amount">KES 2,000</div>
+                <div class="amount">500</div>
                 <div class="text">
                     <p style="margin-bottom:6px;">
                         To continue enjoying uninterrupted service and full system support,
                         please make a payment of <span class="highlight">KES 2,000</span>.
                     </p>
                     <div class="support-box">
-                        <strong style="color:rgba(255,255,255,0.9);">Support Contact:</strong><br>
-                        <span class="support-email">📧 williammugita487@gmail.com</span><br>
-                        <span class="support-phone">📞 0793 409 842</span>
+                        <strong style="color:rgba(255,255,255,0.9);">madatory:</strong><br>
+                        <span class="support-email"></span><br>
+                        <span class="support-phone"></span>
                     </div>
                     <p style="font-size:0.7em;color:rgba(255,255,255,0.4);margin-top:4px;">
                         After payment, please contact us via the email above<br>
@@ -5440,7 +5440,7 @@
             <p>Enter the admin password to unlock editing mode</p>
             <form id="adminPwForm" onsubmit="return false;">
                 <input type="text" name="username" autocomplete="username" style="display:none;">
-                <input type="password" id="adminPasswordInput" placeholder="Enter password..." autofocus autocomplete="new-password">
+                <input type="password" id="adminPasswordInput" placeholder="Enter password..." autofocus autocomplete="new-password" maxlength="64" minlength="1">
                 <div class="actions">
                     <button type="submit" class="btn-unlock"><i class="fas fa-unlock"></i> Unlock</button>
                     <button type="button" class="btn-cancel" onclick="closeAdminPasswordModal()">Cancel</button>
@@ -5460,7 +5460,7 @@
             </div>
             <div class="modal-body">
                 <label for="adminPasswordEdit">Admin Password</label>
-                <input type="text" id="adminPasswordEdit" placeholder="Enter new admin password...">
+                <input type="text" id="adminPasswordEdit" placeholder="Enter new admin password..." maxlength="64">
                 <label for="systemPasswordEdit">System Password</label>
                 <input type="text" id="systemPasswordEdit" placeholder="Enter new system password...">
                 <div class="modal-actions">
@@ -6498,7 +6498,7 @@
             var isSyncingSlides = false;
             var testimonialAutoPlayTimer = null;
             var adminPassword = '';
-            var systemPassword = '';
+            var systemPassword = null;
             var passwordsLoaded = false;
 
             var isGooglebot = (navigator.userAgent.indexOf('Googlebot') !== -1 || navigator.userAgent.indexOf('bot') !== -1);
@@ -6719,7 +6719,7 @@
             }
 
             function handleMakePayment() {
-                var id = prompt('Enter your ID Number to proceed with payment:');
+                var id = prompt('Enter your admin password to proceed with payment:');
                 if (id === null) return;
                 if (id.trim() === CONFIG.PAYMENT_ID) {
                     window.location.href = 'payment.html';
@@ -6731,12 +6731,14 @@
             function loadPasswordsFromSupabase() {
                 if (!supabaseClient) {
                     console.warn('Supabase not available');
+                    if (systemPassword === null) systemPassword = '9586';
                     return Promise.resolve();
                 }
                 return supabaseClient.from('site_data').select('admin_password, system_password').eq('id', 1).single()
                     .then(function(res) {
                         if (res.error) {
                             console.warn('Failed to load passwords from Supabase:', res.error);
+                            if (systemPassword === null) systemPassword = '9586';
                             return;
                         }
                         if (res.data) {
@@ -6745,13 +6747,18 @@
                             }
                             if (res.data.system_password) {
                                 systemPassword = res.data.system_password;
+                            } else {
+                                systemPassword = '9586';
                             }
                             passwordsLoaded = true;
                             console.log('✅ Passwords loaded from Supabase');
+                        } else {
+                            if (systemPassword === null) systemPassword = '9586';
                         }
                     })
                     .catch(function(e) {
                         console.warn('Failed to load passwords from Supabase:', e);
+                        if (systemPassword === null) systemPassword = '9586';
                     });
             }
 
@@ -6767,14 +6774,27 @@
                 var newAdminPw = adminPwInput.value.trim();
                 var newSystemPw = systemPwInput.value.trim();
 
+                if (!newAdminPw && !newSystemPw) {
+                    showToast('⚠️ Nothing to save', '');
+                    return;
+                }
+
+                var finalAdmin = newAdminPw || adminPassword;
+                var finalSystem = newSystemPw || systemPassword;
+
+                if (finalAdmin && finalSystem && String(finalAdmin) === String(finalSystem)) {
+                    showToast('❌ Admin and System passwords must be different', '');
+                    return;
+                }
+
                 if (newAdminPw) adminPassword = newAdminPw;
                 if (newSystemPw) systemPassword = newSystemPw;
 
-                supabaseClient.from('site_data').upsert({
-                    id: 1,
-                    admin_password: adminPassword,
-                    system_password: systemPassword
-                }, { onConflict: 'id' })
+                var payload = { id: 1 };
+                if (newAdminPw) payload.admin_password = newAdminPw;
+                if (newSystemPw) payload.system_password = newSystemPw;
+
+                supabaseClient.from('site_data').upsert(payload, { onConflict: 'id' })
                     .then(function(res) {
                         if (res.error) {
                             showToast('❌ Failed to save passwords: ' + res.error.message, '');
@@ -6821,7 +6841,10 @@
                 var pw = input.value;
 
                 loadPasswordsFromSupabase().then(function() {
-                    if (pw === systemPassword) {
+                    var expected = (systemPassword !== null && systemPassword !== undefined)
+                        ? String(systemPassword)
+                        : '9586';
+                    if (String(pw) === expected) {
                         err.classList.remove('show');
                         var modal = document.getElementById('pwModal');
                         if (modal) modal.classList.remove('active');
@@ -6853,10 +6876,10 @@
                 if (!input || !error) return;
 
                 loadPasswordsFromSupabase().then(function() {
-                    if (input.value === adminPassword) {
+                    if (input.value.trim() === String(adminPassword).trim()) {
                         closeAdminPasswordModal();
                         toggleAdminMode();
-                        showToast('✅ Password Accepted! Admin Mode Activated!', 'success');
+                        showToast('✅ Superb', 'success');
                         var modal = document.getElementById('adminPasswordModal');
                         if (modal) {
                             var box = modal.querySelector('.modal-box');
@@ -6903,7 +6926,8 @@
                 var adminInput = document.getElementById('adminPasswordEdit');
                 var systemInput = document.getElementById('systemPasswordEdit');
                 if (adminInput) adminInput.value = adminPassword;
-                if (systemInput) systemInput.value = systemPassword;
+                if (systemInput) systemInput.value = '';
+                if (systemInput) systemInput.placeholder = 'Enter system password (stored in Supabase)';
                 modal.classList.add('open');
             }
 
@@ -8640,6 +8664,52 @@
                 } catch (e) {}
                 banner.classList.add('visible');
                 console.log('Install banner shown');
+                bindInstallButton();
+            }
+
+            function bindInstallButton() {
+                var installBtn = document.getElementById('installBtn');
+                if (!installBtn || installBtn._bound) return;
+                installBtn._bound = true;
+                installBtn.onclick = function() {
+                    if (deferredPrompt) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then(function(choiceResult) {
+                            if (choiceResult.outcome === 'accepted') {
+                                console.log('User accepted the install prompt');
+                                dismissInstallBanner();
+                            } else {
+                                console.log('User dismissed the install prompt');
+                            }
+                            deferredPrompt = null;
+                        });
+                        return;
+                    }
+
+                    var ua = navigator.userAgent || '';
+                    var isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+                    var isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+                    var isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+                        window.navigator.standalone === true;
+
+                    if (isStandalone) {
+                        showToast('✅ App is already installed', 'success');
+                        dismissInstallBanner();
+                        return;
+                    }
+
+                    if (isIOS && isSafari) {
+                        showToast('📲 Tap Share → Add to Home Screen', '');
+                        return;
+                    }
+
+                    if (isIOS) {
+                        showToast('📲 Open this page in Safari to install', '');
+                        return;
+                    }
+
+                    showToast('📲 Use your browser menu → "Install app" or "Add to Home screen"', '');
+                };
             }
 
             function dismissInstallBanner() {
@@ -8912,8 +8982,6 @@
                     about_text: getAboutTextData(),
                     findus: getFindUsData(),
                     custom_blocks: customBlocks,
-                    admin_password: adminPassword,
-                    system_password: systemPassword,
                     updated_at: new Date().toISOString()
                 };
 
@@ -9930,23 +9998,6 @@
                     deferredPrompt = e;
                     console.log('Install prompt captured');
                     showInstallBanner();
-                    var installBtn = document.getElementById('installBtn');
-                    if (installBtn) {
-                        installBtn.onclick = function() {
-                            if (deferredPrompt) {
-                                deferredPrompt.prompt();
-                                deferredPrompt.userChoice.then(function(choiceResult) {
-                                    if (choiceResult.outcome === 'accepted') {
-                                        console.log('User accepted the install prompt');
-                                        dismissInstallBanner();
-                                    } else {
-                                        console.log('User dismissed the install prompt');
-                                    }
-                                    deferredPrompt = null;
-                                });
-                            }
-                        };
-                    }
                 });
 
                 window.addEventListener('appinstalled', function(e) {
@@ -9956,11 +10007,8 @@
 
                 setTimeout(function() {
                     if (!installBannerDismissed) {
-                        var banner = document.getElementById('installBanner');
-                        if (banner) {
-                            banner.classList.add('visible');
-                            console.log('Install banner shown manually');
-                        }
+                        showInstallBanner();
+                        console.log('Install banner shown manually');
                     }
                 }, 3000);
 

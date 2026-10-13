@@ -1,0 +1,19 @@
+{
+  "name": "Difathar Soccer Academy",
+  "short_name": "Difathar",
+  "description": "Elite soccer training, player development, and mentorship in Embu County, Kenya.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070f1a",
+  "theme_color": "#070f1a",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjUwIiBmaWxsPSIjMDBkNGZmIi8+PHRleHQgeD0iMjU2IiB5PSIzNDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI1MCIgZmlsbD0iIzA3MGYxYSIgZm9udC13ZWlnaHQ9IjkwMCI+RDwvdGV4dD48L3N2Zz4=",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
